@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Keep this list in sync with ADMIN_EMAILS in public/js/firebase-config.js
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['REPLACE_WITH_ADMIN_EMAIL@gmail.com'];
+    }
+
+    // Booked dates. Document id = the date, "YYYY-MM-DD".
+    // Visitors may look up ONE date (get) but may not list the calendar.
+    // Documents are publicly readable by id, so never store client names or notes here.
+    match /bookedDates/{date} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    // Quote requests from the website form. Anyone may create a well-formed one; only the admin reads them.
+    match /quoteRequests/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['name', 'eventType', 'date', 'message', 'createdAt', 'status', 'source'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 100
+        && request.resource.data.eventType in ['חתונה', 'אירוע / מסיבה', 'וידאו לסושיאל', 'אחר']
+        && request.resource.data.date is string && request.resource.data.date.size() <= 10
+        && request.resource.data.message is string && request.resource.data.message.size() <= 2000
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.status == 'new'
+        && request.resource.data.source == 'website';
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['new', 'handled'];
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
